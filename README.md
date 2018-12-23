@@ -25,4 +25,15 @@ golang.org/x/vgo
 golang.org/x/tour
 ```
 
-### 
+### 下载使用
+```
+rm -rf $GOPATH/src/golang.org/x && git clone https://github.com/cnbattle/golang.org-x.git $GOPATH/src/golang.org/x
+```
+
+### 最新更新时间
+
+2018.12.23
+
+### 项目总大小
+
+379MB
