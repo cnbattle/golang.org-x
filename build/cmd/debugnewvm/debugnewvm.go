@@ -30,8 +30,10 @@ var (
 	overrideImage = flag.String("override-image", "", "if non-empty, an alternate GCE VM image or container image to use, depending on the host type")
 	serial        = flag.Bool("serial", true, "watch serial")
 	pauseAfterUp  = flag.Duration("pause-after-up", 0, "pause for this duration before buildlet is destroyed")
+	sleepSec      = flag.Int("sleep-test-secs", 0, "number of seconds to sleep when buildlet comes up, to test time source; OpenBSD only for now")
 
-	runBuild = flag.String("run-build", "", "optional builder name to run all.bash for")
+	runBuild = flag.String("run-build", "", "optional builder name to run all.bash or make.bash for")
+	makeOnly = flag.Bool("make-only", false, "if a --run-build builder name is given, this controls whether make.bash or all.bash is run")
 	buildRev = flag.String("rev", "master", "if --run-build is specified, the git hash or branch name to build")
 )
 
@@ -59,6 +61,9 @@ func main() {
 	if *hostType == "" {
 		log.Fatalf("missing --host (or --run-build)")
 	}
+	if *sleepSec != 0 && !strings.Contains(*hostType, "openbsd") {
+		log.Fatalf("The --sleep-test-secs is currently only supported for openbsd hosts.")
+	}
 
 	hconf, ok := dashboard.Hosts[*hostType]
 	if !ok {
@@ -74,9 +79,9 @@ func main() {
 			hconf.VMImage = img
 		}
 	}
-	vmImageSummary := hconf.VMImage
+	vmImageSummary := fmt.Sprintf("%q", hconf.VMImage)
 	if hconf.IsContainer() {
-		vmImageSummary = fmt.Sprintf("cos-stable, running %v", hconf.ContainerImage)
+		vmImageSummary = fmt.Sprintf("%q, running container %q", hconf.ContainerVMImage(), hconf.ContainerImage)
 	}
 
 	env = buildenv.FromFlags()
@@ -91,7 +96,7 @@ func main() {
 
 	name := fmt.Sprintf("debug-temp-%d", time.Now().Unix())
 
-	log.Printf("Creating %s (with VM image %q)", name, vmImageSummary)
+	log.Printf("Creating %s (with VM image %s)", name, vmImageSummary)
 	bc, err := buildlet.StartNewVM(creds, env, name, *hostType, buildlet.VMOpts{
 		OnInstanceRequested: func() { log.Printf("instance requested") },
 		OnInstanceCreated: func() {
@@ -117,6 +122,19 @@ func main() {
 	}
 	dir, err := bc.WorkDir()
 	log.Printf("WorkDir: %v, %v", dir, err)
+
+	if *sleepSec > 0 {
+		bc.Exec("sysctl", buildlet.ExecOpts{
+			Output:      os.Stdout,
+			SystemLevel: true,
+			Args:        []string{"kern.timecounter.hardware"},
+		})
+		bc.Exec("bash", buildlet.ExecOpts{
+			Output:      os.Stdout,
+			SystemLevel: true,
+			Args:        []string{"-c", "rdate -p -v time.nist.gov; sleep " + fmt.Sprint(*sleepSec) + "; rdate -p -v time.nist.gov"},
+		})
+	}
 
 	var buildFailed bool
 	if *runBuild != "" {
@@ -144,20 +162,26 @@ func main() {
 			log.Fatalf("Putting VERSION file: %v", err)
 		}
 
-		allScript := bconf.AllScript()
-		log.Printf("Running %s ...", allScript)
-		remoteErr, err := bc.Exec(path.Join("go", allScript), buildlet.ExecOpts{
+		script := bconf.AllScript()
+		if *makeOnly {
+			script = bconf.MakeScript()
+		}
+		t0 := time.Now()
+		log.Printf("Running %s ...", script)
+		remoteErr, err := bc.Exec(path.Join("go", script), buildlet.ExecOpts{
 			Output:   os.Stdout,
 			ExtraEnv: bconf.Env(),
 			Debug:    true,
 			Args:     bconf.AllScriptArgs(),
 		})
 		if err != nil {
-			log.Fatalf("error trying to run %s: %v", allScript, err)
+			log.Fatalf("error trying to run %s: %v", script, err)
 		}
 		if remoteErr != nil {
-			log.Printf("remote failure running %s: %v", allScript, remoteErr)
+			log.Printf("remote failure running %s: %v", script, remoteErr)
 			buildFailed = true
+		} else {
+			log.Printf("ran %s in %v", script, time.Since(t0).Round(time.Second))
 		}
 	}
 

@@ -345,6 +345,15 @@ func (b *Build) make() error {
 
 	if b.Source {
 		b.logf("Skipping build.")
+
+		// Remove unwanted top-level directories and verify only "go" remains:
+		if err := client.RemoveAll("tmp", "gocache"); err != nil {
+			return err
+		}
+		if err := b.checkTopLevelDirs(client); err != nil {
+			return fmt.Errorf("verifying no unwanted top-level directories: %v", err)
+		}
+
 		return b.fetchTarball(client)
 	}
 
@@ -477,7 +486,15 @@ func (b *Build) make() error {
 	// cmd/link, etc. If they want to, they still can, but they'll
 	// have to pay the cost of rebuilding dependent libaries. No
 	// need to ship them just in case.
-	if err := client.RemoveAll(b.pkgDir() + "/cmd"); err != nil {
+	//
+	// Also remove go/pkg/${GOOS}_${GOARCH}_{dynlink,shared,testcshared_shared}
+	// per Issue 20038.
+	if err := client.RemoveAll(
+		b.pkgDir()+"/cmd",
+		b.pkgDir()+"_dynlink",
+		b.pkgDir()+"_shared",
+		b.pkgDir()+"_testcshared_shared",
+	); err != nil {
 		return err
 	}
 
@@ -499,7 +516,7 @@ func (b *Build) make() error {
 		return err
 	}
 
-	cleanFiles := []string{"releaselet.go", goPath, go14}
+	cleanFiles := []string{"releaselet.go", goPath, go14, "tmp", "gocache"}
 
 	switch b.OS {
 	case "darwin":
@@ -523,10 +540,33 @@ func (b *Build) make() error {
 		return err
 	}
 
+	// And verify there's no other top-level stuff besides the "go" directory:
+	if err := b.checkTopLevelDirs(client); err != nil {
+		return fmt.Errorf("verifying no unwanted top-level directories: %v", err)
+	}
+
 	if b.OS == "windows" {
 		return b.fetchZip(client)
 	}
 	return b.fetchTarball(client)
+}
+
+// checkTopLevelDirs checks that all files under client's "."
+// ($WORKDIR) are are under "go/".
+func (b *Build) checkTopLevelDirs(client *buildlet.Client) error {
+	var badFileErr error // non-nil once an unexpected file/dir is found
+	if err := client.ListDir(".", buildlet.ListDirOpts{Recursive: true}, func(ent buildlet.DirEntry) {
+		name := ent.Name()
+		if !(strings.HasPrefix(name, "go/") || strings.HasPrefix(name, `go\`)) {
+			b.logf("unexpected file: %q", name)
+			if badFileErr == nil {
+				badFileErr = fmt.Errorf("unexpected filename %q found after cleaning", name)
+			}
+		}
+	}); err != nil {
+		return err
+	}
+	return badFileErr
 }
 
 func (b *Build) fetchTarball(client *buildlet.Client) error {

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// +build linux
+
 // Code related to remote buildlets. See x/build/remote-buildlet.txt
 
 package main // import "golang.org/x/build/cmd/coordinator"
@@ -261,19 +263,6 @@ func remoteBuildletStatus() string {
 	buf.WriteString("</ul>")
 
 	return buf.String()
-}
-
-// httpRouter separates out HTTP traffic being proxied
-// to buildlets on behalf of remote clients from traffic
-// destined for the coordinator itself (the default).
-type httpRouter struct{}
-
-func (httpRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("X-Buildlet-Proxy") != "" {
-		requireBuildletProxyAuth(http.HandlerFunc(proxyBuildletHTTP)).ServeHTTP(w, r)
-	} else {
-		http.DefaultServeMux.ServeHTTP(w, r)
-	}
 }
 
 func proxyBuildletHTTP(w http.ResponseWriter, r *http.Request) {

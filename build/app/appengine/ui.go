@@ -16,14 +16,14 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"golang.org/x/build/types"
-
 	"golang.org/x/build/app/cache"
+	"golang.org/x/build/types"
 
 	"google.golang.org/appengine"
 	"google.golang.org/appengine/datastore"
@@ -31,13 +31,18 @@ import (
 	"google.golang.org/appengine/memcache"
 )
 
+// isDevAppServer is whether we're running locally with dev_appserver.py.
+// This is the documented way to check which environment we're running in, per:
+//   https://cloud.google.com/appengine/docs/standard/python/tools/using-local-server#detecting_application_runtime_environment
+var isDevAppServer = !strings.HasPrefix(os.Getenv("SERVER_SOFTWARE"), "Google App Engine/")
+
 func init() {
 	handleFunc("/", uiHandler)
 }
 
 // uiHandler draws the build status page.
 func uiHandler(w http.ResponseWriter, r *http.Request) {
-	d := dashboardForRequest(r)
+	d := goDash
 	c := d.Context(appengine.NewContext(r))
 	now := cache.Now(c)
 	key := "build-ui"
@@ -107,6 +112,9 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
 			s, err := GetTagState(c, "tip", "")
 			if err != nil {
 				if err == datastore.ErrNoSuchEntity {
+					if isDevAppServer {
+						goto BuildData
+					}
 					err = fmt.Errorf("tip tag not found")
 				}
 				logErr(w, r, err)
@@ -132,6 +140,7 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+	BuildData:
 		p := &Pagination{}
 		if len(commits) == commitsPerPage {
 			p.Next = page + 1
@@ -184,6 +193,10 @@ func listBranches(c context.Context) (branches []string) {
 		return
 	}
 	for _, c := range commits {
+		if strings.HasPrefix(c.Branch, "release-branch.go") &&
+			strings.HasSuffix(c.Branch, "-security") {
+			continue
+		}
 		branches = append(branches, c.Branch)
 	}
 	return
@@ -194,7 +207,7 @@ func listBranches(c context.Context) (branches []string) {
 //    hash builder failure-url
 func failuresHandler(w http.ResponseWriter, r *http.Request, data *uiTemplateData) {
 	w.Header().Set("Content-Type", "text/plain")
-	d := dashboardForRequest(r)
+	d := goDash
 	for _, c := range data.Commits {
 		for _, b := range data.Builders {
 			res := c.Result(b, "")
@@ -210,7 +223,7 @@ func failuresHandler(w http.ResponseWriter, r *http.Request, data *uiTemplateDat
 // jsonHandler is https://build.golang.org/?mode=json
 // The output is a types.BuildStatus JSON object.
 func jsonHandler(w http.ResponseWriter, r *http.Request, data *uiTemplateData) {
-	d := dashboardForRequest(r)
+	d := goDash
 
 	// cell returns one of "" (no data), "ok", or a failure URL.
 	cell := func(res *Result) string {
@@ -301,6 +314,20 @@ func dashCommits(c context.Context, pkg *Package, page int, branch string) ([]*C
 	var commits []*Commit
 	_, err := q.Limit(commitsPerPage).Offset(offset).
 		GetAll(c, &commits)
+
+	// If we're running locally and don't have data, return some test data.
+	// This lets people hack on the UI without setting up gitmirror & friends.
+	if len(commits) == 0 && isDevAppServer && err == nil {
+		commits = []*Commit{
+			{
+				Hash:       "7d7c6a97f815e9279d08cfaea7d5efb5e90695a8",
+				ParentHash: "",
+				Num:        1,
+				User:       "bwk",
+				Desc:       "hello, world",
+			},
+		}
+	}
 	return commits, err
 }
 
@@ -328,6 +355,10 @@ func commitBuilders(commits []*Commit) []string {
 		for _, r := range commit.Results() {
 			builders[r.Builder] = true
 		}
+	}
+	// In dev_appserver mode, add some dummy data:
+	if len(builders) == 0 && isDevAppServer {
+		return []string{"linux-amd64", "linux-amd64-nocgo", "linux-amd64-race", "windows-386", "windows-amd64"}
 	}
 	k := keys(builders)
 	sort.Sort(builderOrder(k))
@@ -411,6 +442,15 @@ type TagState struct {
 	Name     string // "tip", "release-branch.go1.4", etc
 	Tag      *Commit
 	Packages []*PackageState
+}
+
+// Branch returns the git branch name, converting from the old
+// terminology we used from Go's hg days into git terminology.
+func (ts *TagState) Branch() string {
+	if ts.Name == "tip" {
+		return "master"
+	}
+	return ts.Name
 }
 
 // PackageState represents the state of a Package at a Tag.
@@ -532,16 +572,15 @@ var uiTemplate = template.Must(
 )
 
 var tmplFuncs = template.FuncMap{
-	"buildDashboards":   buildDashboards,
-	"builderOS":         builderOS,
-	"builderSpans":      builderSpans,
-	"builderSubheading": builderSubheading,
-	"builderTitle":      builderTitle,
-	"shortDesc":         shortDesc,
-	"shortHash":         shortHash,
-	"shortUser":         shortUser,
-	"tail":              tail,
-	"unsupported":       unsupported,
+	"builderSpans":       builderSpans,
+	"builderSubheading":  builderSubheading,
+	"builderSubheading2": builderSubheading2,
+	"shortDesc":          shortDesc,
+	"shortHash":          shortHash,
+	"shortUser":          shortUser,
+	"tail":               tail,
+	"unsupported":        unsupported,
+	"isUntested":         isUntested,
 }
 
 func splitDash(s string) (string, string) {
@@ -579,26 +618,19 @@ func builderSubheading(s string) string {
 	if isRace(s) {
 		return builderOS(s)
 	}
-	arch := builderArch(s)
-	switch arch {
-	case "amd64":
-		return "x64"
-	}
-	return arch
+	return builderArch(s)
 }
 
-// builderArchChar returns the architecture letter for a builder string
-func builderArchChar(s string) string {
-	arch := builderArch(s)
-	switch arch {
-	case "386":
-		return "8"
-	case "amd64":
-		return "6"
-	case "arm":
-		return "5"
+// builderSubheading2 returns any third part of a hyphenated builder name.
+// For instance, for "linux-amd64-nocgo", it returns "nocgo".
+// For race builders it returns the empty string.
+func builderSubheading2(s string) string {
+	if isRace(s) {
+		return ""
 	}
-	return arch
+	_, secondThird := splitDash(s)
+	_, third := splitDash(secondThird)
+	return third
 }
 
 type builderSpan struct {
@@ -623,16 +655,6 @@ func builderSpans(s []string) []builderSpan {
 		s = s[i:]
 	}
 	return sp
-}
-
-// builderTitle formats "linux-amd64-foo" as "linux amd64 foo".
-func builderTitle(s string) string {
-	return strings.Replace(s, "-", " ", -1)
-}
-
-// buildDashboards returns the known public dashboards.
-func buildDashboards() []*Dashboard {
-	return dashboards
 }
 
 // shortDesc returns the first line of a description.

@@ -7,6 +7,7 @@
 #define __Issue10788_H__
 
 @import Foundation;
+#include "ref.h"
 #include "Universe.objc.h"
 
 
@@ -15,18 +16,17 @@
 @class Issue10788TestInterface;
 
 @protocol Issue10788TestInterface <NSObject>
-- (void)doSomeWork:(Issue10788TestStruct*)s;
-- (void)multipleUnnamedParams:(long)p0 p1:(NSString*)p1 日本:(int64_t)日本;
+- (void)doSomeWork:(Issue10788TestStruct* _Nullable)s;
+- (void)multipleUnnamedParams:(long)p0 p1:(NSString* _Nullable)p1 日本:(int64_t)日本;
 @end
 
 @interface Issue10788TestStruct : NSObject <goSeqRefInterface> {
 }
 @property(strong, readonly) id _ref;
 
-- (instancetype)initWithRef:(id)ref;
-- (instancetype)init;
-- (NSString*)value;
-- (void)setValue:(NSString*)v;
+- (nonnull instancetype)initWithRef:(id)ref;
+- (nonnull instancetype)init;
+@property (nonatomic) NSString* _Nonnull value;
 @end
 
 @class Issue10788TestInterface;
@@ -36,8 +36,8 @@
 @property(strong, readonly) id _ref;
 
 - (instancetype)initWithRef:(id)ref;
-- (void)doSomeWork:(Issue10788TestStruct*)s;
-- (void)multipleUnnamedParams:(long)p0 p1:(NSString*)p1 日本:(int64_t)日本;
+- (void)doSomeWork:(Issue10788TestStruct* _Nullable)s;
+- (void)multipleUnnamedParams:(long)p0 p1:(NSString* _Nullable)p1 日本:(int64_t)日本;
 @end
 
 #endif

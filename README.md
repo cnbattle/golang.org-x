@@ -32,8 +32,8 @@ rm -rf $GOPATH/src/golang.org/x && git clone https://github.com/cnbattle/golang.
 
 ### 最新更新时间
 
-2018.12.23
+2019.03.17
 
 ### 项目总大小
 
-379MB
+374MB

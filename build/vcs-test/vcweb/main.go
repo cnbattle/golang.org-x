@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// +build linux
+
 package main
 
 import (
@@ -65,6 +67,7 @@ func main() {
 	http.Handle("/svn/", svnHandler())
 	http.Handle("/fossil/", fossilHandler())
 	http.Handle("/bzr/", bzrHandler())
+	http.Handle("/insecure/", insecureRedirectHandler())
 
 	handler := logger(http.HandlerFunc(loadAndHandle))
 

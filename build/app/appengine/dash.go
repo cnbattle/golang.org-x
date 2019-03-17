@@ -9,15 +9,12 @@ package build
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"google.golang.org/appengine"
 )
 
 func handleFunc(path string, h http.HandlerFunc) {
-	for _, d := range dashboards {
-		http.Handle(d.Prefix+path, hstsHandler(h))
-	}
+	http.Handle(path, hstsHandler(h))
 }
 
 // hstsHandler wraps an http.HandlerFunc such that it sets the HSTS header.
@@ -36,39 +33,18 @@ type Dashboard struct {
 	Packages  []*Package // The project's packages to build
 }
 
-// dashboardForRequest returns the appropriate dashboard for a given URL path.
-func dashboardForRequest(r *http.Request) *Dashboard {
-	for _, d := range dashboards[1:] {
-		if d.Prefix == "" {
-			panic("prefix can be empty only for the first dashboard")
-		}
-		if strings.HasPrefix(r.URL.Path, d.Prefix) {
-			return d
-		}
-	}
-	if dashboards[0].Prefix != "" {
-		panic("prefix for the first dashboard should be empty")
-	}
-	return dashboards[0]
-}
-
 // Context returns a namespaced context for this dashboard, or panics if it
 // fails to create a new context.
-func (d *Dashboard) Context(c context.Context) context.Context {
+func (d *Dashboard) Context(ctx context.Context) context.Context {
 	if d.Namespace == "" {
-		return c
+		return ctx
 	}
-	n, err := appengine.Namespace(c, d.Namespace)
+	n, err := appengine.Namespace(ctx, d.Namespace)
 	if err != nil {
 		panic(err)
 	}
 	return n
 }
-
-// The currently known dashboards.
-// The first one should have an empty prefix and
-// the other ones a non empty prefix.
-var dashboards = []*Dashboard{goDash, gccgoDash}
 
 // goDash is the dashboard for the main go repository.
 var goDash = &Dashboard{
@@ -186,28 +162,18 @@ var goPackages = []*Package{
 	},
 }
 
-// gccgoDash is the dashboard for gccgo.
-var gccgoDash = &Dashboard{
-	Name:      "Gccgo",
-	Namespace: "Gccgo",
-	Prefix:    "/gccgo",
-	Packages: []*Package{
-		{
-			Kind: "gccgo",
-			Name: "Gccgo",
-		},
-	},
-}
-
 // hiddenBranches specifies branches that
 // should not be displayed on the build dashboard.
 // This also prevents the builder infrastructure
 // from testing sub-repos against these branches.
 var hiddenBranches = map[string]bool{
-	"release-branch.go1.4": true,
-	"release-branch.go1.5": true,
-	"release-branch.go1.6": true,
-	"release-branch.go1.7": true,
-	"release-branch.go1.8": true,
-	"release-branch.go1.9": true,
+	"release-branch.go1.4":           true,
+	"release-branch.go1.5":           true,
+	"release-branch.go1.6":           true,
+	"release-branch.go1.7":           true,
+	"release-branch.go1.8":           true,
+	"release-branch.go1.9":           true,
+	"release-branch.go1.10":          true,
+	"release-branch.go1.10-security": true,
+	"release-branch.go1.11-security": true,
 }

@@ -65,6 +65,7 @@ func (w *Work) gitTagVersion() {
 		out := r.runOut("git", "rev-parse", w.Version)
 		w.VersionCommit = strings.TrimSpace(string(out))
 		w.log.Printf("Git tag already exists (%s), resuming release.", w.VersionCommit)
+		return
 	}
 	out := r.runOut("git", "rev-parse", "HEAD")
 	w.VersionCommit = strings.TrimSpace(string(out))
@@ -88,4 +89,11 @@ func (w *Work) gitTagVersion() {
 		return
 	}
 	r.run("git", "push", "origin", w.Version)
+}
+
+// gitHeadCommit returns the hash of the HEAD commit.
+func (w *Work) gitHeadCommit() string {
+	r := w.runner(filepath.Join(w.Dir, "gitwork"))
+	out := r.runOut("git", "rev-parse", "HEAD")
+	return strings.TrimSpace(string(out))
 }

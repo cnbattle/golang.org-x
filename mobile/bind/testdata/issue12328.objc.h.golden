@@ -7,6 +7,7 @@
 #define __Issue12328_H__
 
 @import Foundation;
+#include "ref.h"
 #include "Universe.objc.h"
 
 
@@ -16,10 +17,9 @@
 }
 @property(strong, readonly) id _ref;
 
-- (instancetype)initWithRef:(id)ref;
-- (instancetype)init;
-- (NSError*)err;
-- (void)setErr:(NSError*)v;
+- (nonnull instancetype)initWithRef:(id)ref;
+- (nonnull instancetype)init;
+@property (nonatomic) NSError* _Nullable err;
 @end
 
 #endif
